@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: ultraclean-bot
+    runtime: python
+    repo: https://github.com/FaresCodeX/UltraClean-Bot
+    plan: free
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: REMINI_AUTH_TOKEN
+        sync: false
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
