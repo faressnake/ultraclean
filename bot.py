@@ -12,7 +12,6 @@ from flask import Flask, request, abort
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ------------------- إعدادات تيليجرام -------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_TOKEN:
     logger.error("لم يتم العثور على TELEGRAM_BOT_TOKEN")
@@ -20,55 +19,45 @@ if not TELEGRAM_TOKEN:
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN, skip_pending=True)
 
-# ------------------- إعدادات NanoBanana Pro -------------------
 NANO_BANANA_URL = "http://de3.bot-hosting.net:21007/kilwa-nanobanana-pro"
 NANO_BANANA_EDIT_URL = "http://de3.bot-hosting.net:21007/kilwa-nanobanana-edit"
 
-# ------------------- إعدادات Remini -------------------
 REMINI_ENHANCE_URL = "https://reaimagine.zipoapps.com/enhance/autoenhance/"
 REMINI_RESULT_URL = "https://reaimagine.zipoapps.com/enhance/request_res/"
 AUTH_TOKEN = os.environ.get("REMINI_AUTH_TOKEN", "-mY6Nh3EWwV1JihHxpZEGV1hTxe2M_zDyT0i8WNeDV4buW9l02UteD6ZZrlAIO0qf6NhYA")
 
-# تخزين إعدادات المستخدمين
 user_settings = {}
 temp_images = {}
 
 # ========== دوال NanoBanana ==========
 def generate_image_from_text(prompt):
-    """توليد صورة من نص"""
     try:
         url = f"{NANO_BANANA_URL}?text={requests.utils.quote(prompt)}"
-        logger.info(f"طلب توليد: {url}")
         response = requests.get(url, timeout=90)
         
-        logger.info(f"Status: {response.status_code}")
         if response.status_code == 200:
             data = response.json()
-            logger.info(f"Response: {data}")
             if data.get("status") == "success":
                 image_url = data.get("image_url")
                 if image_url:
-                    # تحميل الصورة من الرابط
                     img_response = requests.get(image_url, timeout=60)
                     if img_response.status_code == 200:
                         return img_response.content
-                    else:
-                        logger.error(f"فشل تحميل الصورة: {img_response.status_code}")
-            else:
-                logger.error(f"API قال fail: {data}")
-            return None
-        else:
-            logger.error(f"HTTP خطأ: {response.status_code}")
-            return None
+        return None
     except Exception as e:
-        logger.error(f"استثناء: {e}")
+        logger.error(f"توليد خطأ: {e}")
         return None
 
 def edit_image_with_prompt(image_base64, prompt):
-    """تعديل صورة موجودة"""
+    """تعديل صورة - إرسال POST (الحل الصحيح)"""
     try:
-        url = f"{NANO_BANANA_EDIT_URL}?text={requests.utils.quote(prompt)}&img=data:image/jpeg;base64,{image_base64}"
-        response = requests.get(url, timeout=90)
+        # إرسال POST بدلاً من GET لتجنب طول الرابط
+        payload = {
+            "text": prompt,
+            "img": f"data:image/jpeg;base64,{image_base64}"
+        }
+        
+        response = requests.post(NANO_BANANA_EDIT_URL, data=payload, timeout=90)
         
         if response.status_code == 200:
             data = response.json()
@@ -78,13 +67,11 @@ def edit_image_with_prompt(image_base64, prompt):
                     img_response = requests.get(image_url, timeout=60)
                     if img_response.status_code == 200:
                         return img_response.content
-            return None
         return None
     except Exception as e:
-        logger.error(f"Edit استثناء: {e}")
+        logger.error(f"تعديل خطأ: {e}")
         return None
 
-# ========== دوال Remini ==========
 def enhance_image_with_remini(image_bytes):
     files = {
         "file": ("image.jpg", image_bytes, "image/jpeg"),
@@ -162,9 +149,9 @@ def start(message):
     }
     bot.send_message(message.chat.id, 
         "🌟 *بوت NanoBanana Pro + UltraClean* 🌟\n\n"
-        "• 🎨 *توليد صورة* - اكتب وصف وسأولد لك صورة\n"
+        "• 🎨 *توليد صورة* - اكتب وصف\n"
         "• ✏️ *تعديل صورة* - أرسل صورة ثم اكتب التعديل\n"
-        "• ✨ *تحسين الصورة* - أرسل صورة لتحسين جودتها\n\n"
+        "• ✨ *تحسين الصورة* - أرسل صورة\n\n"
         "👨‍💻 *المطور:* `By FaresCodeX`",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard())
@@ -184,98 +171,55 @@ def callback_handler(call):
         }
     
     if call.data == "back_to_main":
-        bot.edit_message_text(
-            "🌟 *القائمة الرئيسية*",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
-        )
+        bot.edit_message_text("🌟 *القائمة الرئيسية*", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=get_main_keyboard())
         bot.answer_callback_query(call.id)
     
     elif call.data == "generate_text":
         user_settings[user_id]["mode"] = "generate"
-        bot.edit_message_text(
-            "🎨 *توليد صورة*\n\nأرسل لي وصف الصورة.\nمثال: `قطة تجلس على سطح القمر`",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="Markdown"
-        )
+        bot.edit_message_text("🎨 *توليد صورة*\n\nأرسل لي وصف الصورة.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
         bot.answer_callback_query(call.id)
     
     elif call.data == "edit_image":
         user_settings[user_id]["mode"] = "edit_wait_image"
-        bot.edit_message_text(
-            "✏️ *تعديل صورة*\n\nأرسل لي الصورة أولاً.",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="Markdown",
-            reply_markup=get_edit_keyboard()
-        )
+        bot.edit_message_text("✏️ *تعديل صورة*\n\nأرسل لي الصورة أولاً.", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=get_edit_keyboard())
         bot.answer_callback_query(call.id)
     
     elif call.data == "cancel_edit":
         user_settings[user_id]["mode"] = None
         user_settings[user_id]["temp_image"] = None
-        bot.edit_message_text(
-            "❌ تم الإلغاء.\n\n🌟 *القائمة الرئيسية*",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
-        )
+        bot.edit_message_text("❌ تم الإلغاء.\n\n🌟 *القائمة الرئيسية*", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=get_main_keyboard())
         bot.answer_callback_query(call.id)
     
     elif call.data == "start_enhance":
         user_settings[user_id]["mode"] = "enhance"
-        bot.edit_message_text(
-            "✨ *تحسين الصورة*\n\nأرسل لي الصورة.",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="Markdown",
-            reply_markup=get_enhancement_type_keyboard()
-        )
+        bot.edit_message_text("✨ *تحسين الصورة*\n\nأرسل لي الصورة.", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=get_enhancement_type_keyboard())
         bot.answer_callback_query(call.id)
     
     elif call.data == "open_settings":
         bot.edit_message_text(
-            "⚙️ *الإعدادات:*\n\n"
-            f"• نوع التحسين: {user_settings[user_id]['enhance_type']}\n"
-            f"• الجودة: {user_settings[user_id]['quality']}\n"
-            f"• إزالة التشويش: {'نعم' if user_settings[user_id]['denoise'] else 'لا'}\n"
-            f"• زيادة الحدة: {'نعم' if user_settings[user_id]['sharpen'] else 'لا'}",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="Markdown",
-            reply_markup=get_settings_keyboard()
-        )
+            f"⚙️ *الإعدادات:*\n\n• نوع التحسين: {user_settings[user_id]['enhance_type']}\n• الجودة: {user_settings[user_id]['quality']}\n• إزالة التشويش: {'نعم' if user_settings[user_id]['denoise'] else 'لا'}\n• زيادة الحدة: {'نعم' if user_settings[user_id]['sharpen'] else 'لا'}",
+            call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=get_settings_keyboard())
         bot.answer_callback_query(call.id)
     
     elif call.data == "back_to_enhance":
-        bot.edit_message_text(
-            "✨ *تحسين الصورة*\n\nأرسل لي الصورة.",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="Markdown",
-            reply_markup=get_enhancement_type_keyboard()
-        )
+        bot.edit_message_text("✨ *تحسين الصورة*\n\nأرسل لي الصورة.", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=get_enhancement_type_keyboard())
         bot.answer_callback_query(call.id)
     
     elif call.data.startswith("type_"):
         user_settings[user_id]["enhance_type"] = call.data.replace("type_", "")
-        bot.answer_callback_query(call.id, f"✅ تم: {user_settings[user_id]['enhance_type']}")
+        bot.answer_callback_query(call.id)
     
     elif call.data.startswith("quality_"):
         user_settings[user_id]["quality"] = call.data.replace("quality_", "")
-        bot.answer_callback_query(call.id, f"✅ جودة: {user_settings[user_id]['quality']}")
+        bot.answer_callback_query(call.id)
     
     elif call.data == "toggle_denoise":
         user_settings[user_id]["denoise"] = not user_settings[user_id]["denoise"]
-        bot.answer_callback_query(call.id, f"🎯 إزالة التشويش: {'نعم' if user_settings[user_id]['denoise'] else 'لا'}")
+        bot.answer_callback_query(call.id)
     
     elif call.data == "toggle_sharpen":
         user_settings[user_id]["sharpen"] = not user_settings[user_id]["sharpen"]
-        bot.answer_callback_query(call.id, f"📐 زيادة الحدة: {'نعم' if user_settings[user_id]['sharpen'] else 'لا'}")
+        bot.answer_callback_query(call.id)
 
 # ========== معالجة الرسائل ==========
 @bot.message_handler(content_types=['text'])
@@ -295,42 +239,31 @@ def handle_text(message):
     mode = user_settings[user_id].get("mode")
     
     if mode == "generate":
-        bot.send_chat_action(message.chat.id, "upload_photo")
-        bot.reply_to(message, "🎨 جاري التوليد... 20-40 ثانية")
-        
+        bot.reply_to(message, "🎨 جاري التوليد...")
         image_data = generate_image_from_text(message.text)
         if image_data:
-            bot.send_photo(message.chat.id, image_data, 
-                caption=f"✅ تم التوليد!\n📝 {message.text[:100]}\n\n👨‍💻 By FaresCodeX")
+            bot.send_photo(message.chat.id, image_data, caption=f"✅ تم التوليد!\n📝 {message.text[:100]}\n\n👨‍💻 By FaresCodeX")
         else:
-            bot.reply_to(message, "❌ فشل التوليد. الخادم مشغول، حاول لاحقاً.")
-        
+            bot.reply_to(message, "❌ فشل التوليد. حاول لاحقاً.")
         user_settings[user_id]["mode"] = None
     
     elif mode == "edit_wait_prompt":
         temp_image = user_settings[user_id].get("temp_image")
         if temp_image:
-            bot.send_chat_action(message.chat.id, "upload_photo")
-            bot.reply_to(message, "✏️ جاري التعديل... 20-40 ثانية")
-            
+            bot.reply_to(message, "✏️ جاري التعديل...")
             image_data = edit_image_with_prompt(temp_image, message.text)
             if image_data:
-                bot.send_photo(message.chat.id, image_data,
-                    caption=f"✅ تم التعديل!\n📝 {message.text[:100]}\n\n👨‍💻 By FaresCodeX")
+                bot.send_photo(message.chat.id, image_data, caption=f"✅ تم التعديل!\n📝 {message.text[:100]}\n\n👨‍💻 By FaresCodeX")
             else:
-                bot.reply_to(message, "❌ فشل التعديل.")
+                bot.reply_to(message, "❌ فشل التعديل. الخادم مشغول.")
         else:
-            bot.reply_to(message, "❌ خطأ في الصورة، أعد المحاولة.")
-        
+            bot.reply_to(message, "❌ خطأ في الصورة.")
         user_settings[user_id]["mode"] = None
         user_settings[user_id]["temp_image"] = None
     
-    elif mode == "enhance":
-        bot.reply_to(message, "📸 أرسل صورة (وليس نصاً) للتحسين.")
-    
     else:
         if not message.text.startswith('/'):
-            bot.reply_to(message, "🌟 استخدم الأزرار لاختيار الخدمة", reply_markup=get_main_keyboard())
+            bot.reply_to(message, "🌟 استخدم الأزرار", reply_markup=get_main_keyboard())
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
@@ -359,20 +292,16 @@ def handle_photo(message):
         bot.reply_to(message, "✅ استلمت الصورة!\n\n✏️ الآن أرسل التعديل المطلوب")
     
     elif mode == "enhance":
-        bot.reply_to(message, "✨ جاري التحسين... 10-20 ثانية")
-        
+        bot.reply_to(message, "✨ جاري التحسين...")
         enhanced = enhance_image_with_remini(image_bytes)
         if enhanced:
-            settings = user_settings[user_id]
-            bot.send_photo(message.chat.id, enhanced,
-                caption=f"✅ تم التحسين!\n🎚️ {settings['quality']}\n🎯 تشويش: {'نعم' if settings['denoise'] else 'لا'}\n\n👨‍💻 By FaresCodeX")
+            bot.send_photo(message.chat.id, enhanced, caption=f"✅ تم التحسين!\n\n👨‍💻 By FaresCodeX")
         else:
             bot.reply_to(message, "❌ فشل التحسين.")
-        
         user_settings[user_id]["mode"] = None
     
     else:
-        bot.reply_to(message, "📸 اختر الخدمة أولاً من الأزرار:\n• ✏️ تعديل صورة\n• ✨ تحسين الصورة")
+        bot.reply_to(message, "📸 اختر الخدمة أولاً:\n• ✏️ تعديل صورة\n• ✨ تحسين الصورة")
 
 # ------------------- خادم Flask -------------------
 app = Flask(__name__)
